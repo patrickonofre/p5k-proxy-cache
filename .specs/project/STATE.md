@@ -118,7 +118,7 @@ Docker started; T1 context-load IT executed green (`mvn verify`, Tests run: 1). 
 - [x] Rule Store admin REST CRUD (`/admin/rules`, AD-004) + reload/evict on mutation + gateway excludes /admin & /actuator
 - [x] Dockerize — Dockerfile (multi-stage temurin 26) + docker-compose (postgres + go-httpbin upstream + app); `docker compose up -d`
 - [ ] Next feature: Observability — Micrometer hit/miss/bypass counters (X-Cache header already done in filter)
-- [ ] Git not initialized (user deferred) — no commits yet (now also covers Dockerfile, docker-compose.yml, .dockerignore)
+- [x] Git initialized + pushed → github.com/patrickonofre/p5k-proxy-cache (8 atomic feature commits on top of remote Initial commit; SSH, branch main)
 
 ---
 
