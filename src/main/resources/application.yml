@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: p5k-proxy-cache
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/p5kproxy}
+    username: ${DB_USER:p5k}
+    password: ${DB_PASSWORD:p5k}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+proxy:
+  upstream:
+    base-url: ${PROXY_UPSTREAM_BASE_URL:http://localhost:8081}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
