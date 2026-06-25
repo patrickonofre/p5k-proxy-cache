@@ -7,15 +7,19 @@ import java.util.Set;
 
 public record CacheRuleResponse(
         Long id,
+        Long applicationId,
         String pathPattern,
         Set<String> methods,
-        long ttlSeconds,
+        Long ttlSeconds,
         long maxSize,
         boolean enabled,
-        Instant createdAt) {
+        String description,
+        Instant createdAt,
+        Instant updatedAt) {
 
     public static CacheRuleResponse from(CacheRule rule) {
-        return new CacheRuleResponse(rule.getId(), rule.getPathPattern(), rule.getMethods(),
-                rule.getTtlSeconds(), rule.getMaxSize(), rule.isEnabled(), rule.getCreatedAt());
+        return new CacheRuleResponse(rule.getId(), rule.getApplicationId(), rule.getPathPattern(),
+                rule.getMethods(), rule.getTtlSeconds(), rule.getMaxSize(), rule.isEnabled(),
+                rule.getDescription(), rule.getCreatedAt(), rule.getUpdatedAt());
     }
 }

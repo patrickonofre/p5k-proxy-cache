@@ -18,21 +18,25 @@ class CaffeineCacheRegistryTest {
     private final Ticker ticker = clock::get;
     private final CaffeineCacheRegistry registry = new CaffeineCacheRegistry(ticker);
 
+    private static CacheRule rule(long maxSize) {
+        return new CacheRule(1L, 1L, "/a", Set.of("GET"), null, maxSize, true, null);
+    }
+
     private CachedResponse sample() {
         return CachedResponse.capture(200, "text/plain", Map.of(), "v".getBytes());
     }
 
     @Test
     void cacheForReturnsSameInstancePerRule() {
-        CacheRule rule = new CacheRule(1L, "/a", Set.of("GET"), 60, 100, true);
+        CacheRule rule = rule(100);
 
-        assertThat(registry.cacheFor(rule)).isSameAs(registry.cacheFor(rule));
+        assertThat(registry.cacheFor(rule, 60)).isSameAs(registry.cacheFor(rule, 60));
     }
 
     @Test
     void entryExpiresAfterTtl() {
-        CacheRule rule = new CacheRule(1L, "/a", Set.of("GET"), 10, 100, true);
-        Cache<String, CachedResponse> cache = registry.cacheFor(rule);
+        CacheRule rule = rule(100);
+        Cache<String, CachedResponse> cache = registry.cacheFor(rule, 10);
         cache.put("k", sample());
 
         clock.addAndGet(Duration.ofSeconds(11).toNanos());
@@ -43,8 +47,8 @@ class CaffeineCacheRegistryTest {
 
     @Test
     void evictsBeyondMaxSize() {
-        CacheRule rule = new CacheRule(1L, "/a", Set.of("GET"), 60, 2, true);
-        Cache<String, CachedResponse> cache = registry.cacheFor(rule);
+        CacheRule rule = rule(2);
+        Cache<String, CachedResponse> cache = registry.cacheFor(rule, 60);
         cache.put("k1", sample());
         cache.put("k2", sample());
         cache.put("k3", sample());
@@ -55,11 +59,11 @@ class CaffeineCacheRegistryTest {
 
     @Test
     void rebuildReplacesCacheInstance() {
-        CacheRule rule = new CacheRule(1L, "/a", Set.of("GET"), 60, 100, true);
-        Cache<String, CachedResponse> first = registry.cacheFor(rule);
+        CacheRule rule = rule(100);
+        Cache<String, CachedResponse> first = registry.cacheFor(rule, 60);
 
-        registry.rebuild(rule);
+        registry.rebuild(rule, 60);
 
-        assertThat(registry.cacheFor(rule)).isNotSameAs(first);
+        assertThat(registry.cacheFor(rule, 60)).isNotSameAs(first);
     }
 }

@@ -13,9 +13,8 @@ spring:
       ddl-auto: validate
     open-in-view: false
 
-proxy:
-  upstream:
-    base-url: ${PROXY_UPSTREAM_BASE_URL:http://localhost:8081}
+# Upstreams are not configured statically — each application registers its own base URL
+# via /admin/applications and the request slug (first path segment) selects it.
 
 management:
   endpoints:

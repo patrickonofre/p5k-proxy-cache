@@ -7,4 +7,6 @@ import java.util.List;
 public interface CacheRuleRepository extends JpaRepository<CacheRule, Long> {
 
     List<CacheRule> findAllByEnabledTrue();
+
+    List<CacheRule> findByApplicationId(Long applicationId);
 }

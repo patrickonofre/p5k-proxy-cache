@@ -28,12 +28,12 @@ public class CaffeineCacheRegistry {
         this.ticker = ticker;
     }
 
-    public Cache<String, CachedResponse> cacheFor(CacheRule rule) {
-        return caches.computeIfAbsent(rule.getId(), id -> build(rule));
+    public Cache<String, CachedResponse> cacheFor(CacheRule rule, long effectiveTtlSeconds) {
+        return caches.computeIfAbsent(rule.getId(), id -> build(rule, effectiveTtlSeconds));
     }
 
-    public void rebuild(CacheRule rule) {
-        caches.put(rule.getId(), build(rule));
+    public void rebuild(CacheRule rule, long effectiveTtlSeconds) {
+        caches.put(rule.getId(), build(rule, effectiveTtlSeconds));
     }
 
     public void evictRule(Long ruleId) {
@@ -44,9 +44,9 @@ public class CaffeineCacheRegistry {
         caches.clear();
     }
 
-    private Cache<String, CachedResponse> build(CacheRule rule) {
+    private Cache<String, CachedResponse> build(CacheRule rule, long effectiveTtlSeconds) {
         return Caffeine.newBuilder()
-                .expireAfterWrite(Duration.ofSeconds(rule.getTtlSeconds()))
+                .expireAfterWrite(Duration.ofSeconds(effectiveTtlSeconds))
                 .maximumSize(rule.getMaxSize())
                 .ticker(ticker)
                 .build();

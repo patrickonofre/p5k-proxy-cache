@@ -1,5 +1,7 @@
 package com.p5k.proxycache.web;
 
+import com.p5k.proxycache.rules.Application;
+import com.p5k.proxycache.rules.ApplicationRepository;
 import com.p5k.proxycache.rules.CacheRule;
 import com.p5k.proxycache.rules.CacheRuleRepository;
 import com.p5k.proxycache.rules.RuleRegistry;
@@ -26,11 +28,18 @@ class RuleAdminControllerIT extends AbstractPostgresIT {
     CacheRuleRepository repository;
 
     @Autowired
+    ApplicationRepository applications;
+
+    @Autowired
     RuleRegistry registry;
+
+    private Long appId;
 
     @BeforeEach
     void reset() {
         repository.deleteAll();
+        applications.deleteAll();
+        appId = applications.save(new Application("app", "App", "http://localhost:1", null, null, true)).getId();
         registry.reload();
     }
 
@@ -38,9 +47,13 @@ class RuleAdminControllerIT extends AbstractPostgresIT {
         return RestClient.create("http://localhost:" + port);
     }
 
+    private CacheRule seedRule(String pattern, boolean enabled) {
+        return repository.save(new CacheRule(appId, pattern, Set.of("GET"), 60L, 100, enabled, null));
+    }
+
     @Test
     void createPersistsAndIsLiveImmediately() {
-        CacheRuleRequest request = new CacheRuleRequest("/api/**", Set.of("GET"), 120, 500, true);
+        CacheRuleRequest request = new CacheRuleRequest(appId, "/api/**", Set.of("GET"), 120L, 500, true, "items");
 
         Created created = client().post().uri("/admin/rules")
                 .contentType(MediaType.APPLICATION_JSON).body(request)
@@ -48,15 +61,17 @@ class RuleAdminControllerIT extends AbstractPostgresIT {
 
         assertThat(created.status()).isEqualTo(201);
         assertThat(created.body().id()).isNotNull();
+        assertThat(created.body().applicationId()).isEqualTo(appId);
+        assertThat(created.body().description()).isEqualTo("items");
         assertThat(created.body().createdAt()).isNotNull();
         assertThat(repository.findById(created.body().id())).isPresent();
-        assertThat(registry.match("GET", "/api/anything")).isPresent();
+        assertThat(registry.match(appId, "GET", "/api/anything")).isPresent();
     }
 
     @Test
     void listReturnsAllRules() {
-        repository.save(new CacheRule("/a/**", Set.of("GET"), 60, 100, true));
-        repository.save(new CacheRule("/b/**", Set.of("GET"), 60, 100, false));
+        seedRule("/a/**", true);
+        seedRule("/b/**", false);
 
         List<CacheRuleResponse> rules = client().get().uri("/admin/rules")
                 .retrieve().body(new ParameterizedTypeReference<>() {
@@ -67,7 +82,7 @@ class RuleAdminControllerIT extends AbstractPostgresIT {
 
     @Test
     void getByIdReturnsRuleOr404() {
-        CacheRule saved = repository.save(new CacheRule("/a/**", Set.of("GET"), 60, 100, true));
+        CacheRule saved = seedRule("/a/**", true);
 
         int found = client().get().uri("/admin/rules/{id}", saved.getId())
                 .exchange((req, res) -> res.getStatusCode().value());
@@ -80,8 +95,8 @@ class RuleAdminControllerIT extends AbstractPostgresIT {
 
     @Test
     void updateChangesFields() {
-        CacheRule saved = repository.save(new CacheRule("/old/**", Set.of("GET"), 60, 100, true));
-        CacheRuleRequest request = new CacheRuleRequest("/new/**", Set.of("GET"), 300, 200, false);
+        CacheRule saved = seedRule("/old/**", true);
+        CacheRuleRequest request = new CacheRuleRequest(appId, "/new/**", Set.of("GET"), 300L, 200, false, "renamed");
 
         int status = client().put().uri("/admin/rules/{id}", saved.getId())
                 .contentType(MediaType.APPLICATION_JSON).body(request)
@@ -90,13 +105,15 @@ class RuleAdminControllerIT extends AbstractPostgresIT {
         assertThat(status).isEqualTo(200);
         CacheRule reloaded = repository.findById(saved.getId()).orElseThrow();
         assertThat(reloaded.getPathPattern()).isEqualTo("/new/**");
-        assertThat(reloaded.getTtlSeconds()).isEqualTo(300);
+        assertThat(reloaded.getTtlSeconds()).isEqualTo(300L);
         assertThat(reloaded.isEnabled()).isFalse();
+        assertThat(reloaded.getDescription()).isEqualTo("renamed");
+        assertThat(reloaded.getUpdatedAt()).isNotNull();
     }
 
     @Test
     void deleteRemovesRuleAndReloadsRegistry() {
-        CacheRule saved = repository.save(new CacheRule("/api/**", Set.of("GET"), 60, 100, true));
+        CacheRule saved = seedRule("/api/**", true);
         registry.reload();
 
         int status = client().delete().uri("/admin/rules/{id}", saved.getId())
@@ -104,12 +121,12 @@ class RuleAdminControllerIT extends AbstractPostgresIT {
 
         assertThat(status).isEqualTo(204);
         assertThat(repository.findById(saved.getId())).isEmpty();
-        assertThat(registry.match("GET", "/api/x")).isEmpty();
+        assertThat(registry.match(appId, "GET", "/api/x")).isEmpty();
     }
 
     @Test
     void invalidRequestIsRejectedWith400() {
-        CacheRuleRequest invalid = new CacheRuleRequest("", Set.of(), 0, 0, true);
+        CacheRuleRequest invalid = new CacheRuleRequest(appId, "", Set.of(), 0L, 0, true, null);
 
         int status = client().post().uri("/admin/rules")
                 .contentType(MediaType.APPLICATION_JSON).body(invalid)
@@ -117,6 +134,36 @@ class RuleAdminControllerIT extends AbstractPostgresIT {
 
         assertThat(status).isEqualTo(400);
         assertThat(repository.count()).isZero();
+    }
+
+    @Test
+    void unknownApplicationIdRejectedWith400() {
+        CacheRuleRequest request = new CacheRuleRequest(999999L, "/x/**", Set.of("GET"), 60L, 100, true, null);
+
+        int status = client().post().uri("/admin/rules")
+                .contentType(MediaType.APPLICATION_JSON).body(request)
+                .exchange((req, res) -> res.getStatusCode().value());
+
+        assertThat(status).isEqualTo(400);
+        assertThat(repository.count()).isZero();
+    }
+
+    @Test
+    void ttlInheritsApplicationDefaultWhenOmitted() {
+        Long withDefault = applications.save(
+                new Application("withdef", "WithDef", "http://localhost:1", null, 90L, true)).getId();
+
+        CacheRuleRequest inherits = new CacheRuleRequest(withDefault, "/x/**", Set.of("GET"), null, 100, true, null);
+        int ok = client().post().uri("/admin/rules")
+                .contentType(MediaType.APPLICATION_JSON).body(inherits)
+                .exchange((req, res) -> res.getStatusCode().value());
+        assertThat(ok).isEqualTo(201);
+
+        CacheRuleRequest noTtl = new CacheRuleRequest(appId, "/y/**", Set.of("GET"), null, 100, true, null);
+        int rejected = client().post().uri("/admin/rules")
+                .contentType(MediaType.APPLICATION_JSON).body(noTtl)
+                .exchange((req, res) -> res.getStatusCode().value());
+        assertThat(rejected).isEqualTo(400);
     }
 
     private record Created(int status, CacheRuleResponse body) {

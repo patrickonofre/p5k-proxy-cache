@@ -14,6 +14,10 @@ class RuleRegistryTest {
     private final CacheRuleRepository repository = mock(CacheRuleRepository.class);
     private final RuleRegistry registry = new RuleRegistry(repository);
 
+    private static CacheRule rule(long applicationId, String path, boolean enabled) {
+        return new CacheRule(applicationId, path, Set.of("GET"), 60L, 100, enabled, null);
+    }
+
     private void load(CacheRule... rules) {
         when(repository.findAllByEnabledTrue()).thenReturn(List.of(rules));
         registry.reload();
@@ -21,25 +25,23 @@ class RuleRegistryTest {
 
     @Test
     void nonGetMethodNeverMatches() {
-        load(new CacheRule("/a", Set.of("GET"), 60, 100, true));
+        load(rule(1L, "/a", true));
 
-        assertThat(registry.match("POST", "/a")).isEmpty();
+        assertThat(registry.match(1L, "POST", "/a")).isEmpty();
     }
 
     @Test
     void disabledRuleIsExcluded() {
-        load(new CacheRule("/a", Set.of("GET"), 60, 100, false));
+        load(rule(1L, "/a", false));
 
-        assertThat(registry.match("GET", "/a")).isEmpty();
+        assertThat(registry.match(1L, "GET", "/a")).isEmpty();
     }
 
     @Test
     void mostSpecificPatternWins() {
-        CacheRule generic = new CacheRule("/**", Set.of("GET"), 60, 100, true);
-        CacheRule specific = new CacheRule("/api/products/**", Set.of("GET"), 60, 100, true);
-        load(generic, specific);
+        load(rule(1L, "/**", true), rule(1L, "/api/products/**", true));
 
-        assertThat(registry.match("GET", "/api/products/1"))
+        assertThat(registry.match(1L, "GET", "/api/products/1"))
                 .get()
                 .extracting(CacheRule::getPathPattern)
                 .isEqualTo("/api/products/**");
@@ -47,8 +49,19 @@ class RuleRegistryTest {
 
     @Test
     void noPatternMatchReturnsEmpty() {
-        load(new CacheRule("/api/products/**", Set.of("GET"), 60, 100, true));
+        load(rule(1L, "/api/products/**", true));
 
-        assertThat(registry.match("GET", "/orders/1")).isEmpty();
+        assertThat(registry.match(1L, "GET", "/orders/1")).isEmpty();
+    }
+
+    @Test
+    void rulesAreScopedToTheirApplication() {
+        load(rule(1L, "/users/**", true), rule(2L, "/users/**", true));
+
+        assertThat(registry.match(1L, "GET", "/users/1"))
+                .get().extracting(CacheRule::getApplicationId).isEqualTo(1L);
+        assertThat(registry.match(2L, "GET", "/users/1"))
+                .get().extracting(CacheRule::getApplicationId).isEqualTo(2L);
+        assertThat(registry.match(3L, "GET", "/users/1")).isEmpty();
     }
 }

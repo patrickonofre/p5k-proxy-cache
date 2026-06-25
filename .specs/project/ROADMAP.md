@@ -1,7 +1,7 @@
 # Roadmap
 
 **Current Milestone:** M1 — Cacheable Proxy MVP
-**Status:** In Progress — Cache Proxy Core shipped (25 tests green)
+**Status:** In Progress — Core + Rule Store + App Registry/Multi-app routing shipped (47 tests green); Observability pending
 
 ---
 
@@ -24,6 +24,12 @@
 - In-memory rule cache loaded from Postgres
 - Admin REST CRUD for rules
 
+**App Registry + Per-App Routing** - COMPLETE (AD-006/007/008) — multi-upstream
+
+- `application` table + `/admin/applications` CRUD (slug, base_url, default_ttl, description, enabled)
+- `cache_rule.application_id` FK (ON DELETE CASCADE) + MVP fields (description, updated_at, optional ttl)
+- Slug-prefix routing: `/{slug}/rest` → resolve app → stripPrefix(1) → dynamic upstream; unknown slug → 404
+
 **Cache Proxy Core** - COMPLETE
 
 - Single-upstream forwarding via Gateway route
@@ -45,7 +51,7 @@
 
 ### Features
 
-**Multi-route upstreams** - PLANNED
+**Multi-route upstreams** - DONE (pulled into M1 — see App Registry, AD-006)
 **Cache invalidation (manual purge + TTL refresh)** - PLANNED
 **Admin auth (API key / basic)** - PLANNED
 **Conditional requests (ETag / If-None-Match passthrough)** - PLANNED

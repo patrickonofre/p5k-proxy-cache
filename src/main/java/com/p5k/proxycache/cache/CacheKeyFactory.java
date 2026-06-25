@@ -18,8 +18,15 @@ import java.util.stream.Stream;
 public class CacheKeyFactory {
 
     public String keyOf(HttpServletRequest request) {
+        return keyOf(request, request.getRequestURI());
+    }
+
+    /**
+     * Builds the key from an explicit, backend-relative {@code path} (the app slug prefix
+     * already stripped) so the same upstream resource shares one entry regardless of slug.
+     */
+    public String keyOf(HttpServletRequest request, String path) {
         String method = request.getMethod().toUpperCase(Locale.ROOT);
-        String path = request.getRequestURI();
         String query = canonicalQuery(request.getParameterMap());
         return query.isEmpty() ? method + " " + path : method + " " + path + "?" + query;
     }

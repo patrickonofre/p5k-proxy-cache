@@ -1,12 +1,30 @@
 # State
 
 **Last Updated:** 2026-06-24
-**Current Work:** ✅ Cache Proxy Core + Rule Store admin CRUD COMPLETE (31 tests). ✅ Dockerized (Dockerfile multi-stage + docker-compose: postgres + go-httpbin upstream + app) — verified end-to-end: `docker compose up`, seeded /uuid rule, GET twice = MISS→HIT same uuid. Next M1: Observability (Micrometer counters).
+**Current Work:** ✅ App Registry + Per-App Rule Routing COMPLETE (47 tests: 18 unit + 29 IT, `mvn verify` green). Multi-upstream: each `application` (slug + base_url + default_ttl) registered via `/admin/applications`; rules carry `applicationId`. Request `/{slug}/rest` → resolve app → stripPrefix(1) → match rules → HIT/MISS/BYPASS; unknown slug → 404. Supersedes single-upstream (AD-002). MVP fields added: app/rule `description`, `updated_at`, `app.default_ttl_seconds` (rule.ttl now optional). ✅ Cache Proxy Core + Rule Store admin CRUD (earlier). ✅ Dockerized. Next M1: Observability (Micrometer counters).
 **Project renamed:** pk-open-cache → p5k-proxy-cache (artifact com.p5k:p5k-proxy-cache). Working dir folder still named pk-open-cache.
 
 ---
 
 ## Recent Decisions (Last 60 days)
+
+### AD-006: Multi-upstream via Application registry + path-prefix routing (2026-06-24)
+
+**Decision:** Proxy fronts N backends. Each `application` row holds slug + base_url + optional default_ttl; every `cache_rule` references one application. Request `/{slug}/rest` resolves the app by slug, strips the slug (`stripPrefix(1)`), and matches `rest` against that app's rules. **Supersedes AD-002 (single upstream); pulls M2 "Multi-route" into M1.**
+**Reason:** One proxy serving many APIs; keeps rule `path_pattern` backend-relative and disambiguates apps sharing a path.
+**Trade-off:** Clients must namespace requests by slug; unknown slug → 404 (no upstream).
+**Impact:** New `application` table + `/admin/applications` CRUD; `cache_rule.application_id` FK (ON DELETE CASCADE). Passthrough preserved: resolved app + no rule → BYPASS forward.
+
+### AD-007: MVP data enrichment for rules/apps (2026-06-24)
+
+**Decision:** Add `description` (app + rule), `updated_at` (app + rule), `application.default_ttl_seconds`. Rule `ttl_seconds` now optional — effective TTL = `rule.ttl ?? app.default_ttl`, both null → 400. Rule `priority` deferred (AntPathMatcher specificity suffices).
+**Impact:** `CacheRule.ttlSeconds` is `Long` (nullable); `CaffeineCacheRegistry` builds caches from a resolved effective TTL passed in.
+
+### AD-008: Dynamic upstream via GATEWAY_REQUEST_URL_ATTR (2026-06-24, VERIFIED)
+
+**Decision:** Approach 1 from design — `CachingProxyFilter` sets `MvcUtils.GATEWAY_REQUEST_URL_ATTR` (the app base_url URI) per request; the gateway route is `predicate + stripPrefix(1) + http()` with no static `uri()`. The RestClient fallback (Approach 2) was not needed.
+**Reason:** Reuses Spring Cloud Gateway forwarding (AD-001/005) with a per-request target.
+**Impact:** Verified live via `mvn verify` (GatewayRouteIT slug-strip, CachingProxyFilterIT HIT/MISS/BYPASS/404, two-app isolation). See L-006.
 
 ### AD-001: Proxy core built on Spring Cloud Gateway (2026-06-24)
 
@@ -92,6 +110,20 @@ Docker started; T1 context-load IT executed green (`mvn verify`, Tests run: 1). 
 **Solution:** Singleton pattern in `AbstractPostgresIT` — start container in a `static {}` block, no `@Testcontainers`/`@Container`, wire via `@DynamicPropertySource`. Container lives for the whole JVM run; Ryuk cleans up at exit. Also sped ITs up (context reuse).
 **Prevents:** Flaky/slow ITs as the suite grows.
 
+### L-006: SCG server-webmvc dynamic upstream via GATEWAY_REQUEST_URL_ATTR (2026-06-24)
+
+**Context:** Needed a per-request upstream target (multi-app) instead of the static `before(uri(base))`.
+**Verified (javap on gateway-server-webmvc 5.0.2):** `MvcUtils.GATEWAY_REQUEST_URL_ATTR` constant + `MvcUtils.setRequestUrl(ServerRequest, URI)` + `BeforeFilterFunctions.stripPrefix(int)` all exist.
+**Solution:** A servlet filter ahead of the route sets `request.setAttribute(GATEWAY_REQUEST_URL_ATTR, URI.create(app.baseUrl))`; route = `predicate + stripPrefix(1) + http()` (no static uri). `http()` reads the attribute and forwards. Confirmed live by `mvn verify`.
+**Prevents:** Reaching for a custom RestClient forwarder when SCG already supports a dynamic target. baseUrl should be scheme://host[:port] (path comes from the stripped request).
+
+### L-007: Shared Testcontainers DB → each IT class must clean its own tables (2026-06-24)
+
+**Context:** `CacheRuleRepositoryIT` seeded a fixed slug "app" and failed with `duplicate key ... application_slug_key`.
+**Problem:** All ITs share one singleton Postgres (L-004); rows leak across classes/methods. A fixed unique value collides.
+**Solution:** Every IT class clears `cache_rule` then `application` in `@BeforeEach` (rules before apps, or rely on FK cascade). ITs run sequentially (TESTING.md) so global cleanup is safe.
+**Prevents:** Order-dependent IT failures from leftover unique rows.
+
 ---
 
 ## Quick Tasks Completed
@@ -104,7 +136,10 @@ Docker started; T1 context-load IT executed green (`mvn verify`, Tests run: 1). 
 ## Deferred Ideas
 
 - [ ] Redis L2 distributed cache — Captured during: project init (scaling)
-- [ ] Multi-route per-rule upstream — Captured during: project init
+- [x] Multi-route per-app upstream — DONE 2026-06-24 (AD-006, App Registry feature)
+- [ ] Rule `priority` override for matcher tie-break — Deferred from AD-007 (MVP)
+- [ ] Per-app default headers / timeout / retries — Deferred (M2 hardening)
+- [ ] Hard DB NOT NULL on `cache_rule.application_id` (backfill migration) — nullable for now
 - [ ] Per-user/header-varied caching w/ safety controls — Captured during: project init
 - [ ] Cache stampede / single-flight on MISS — Captured during: project init
 
@@ -116,7 +151,8 @@ Docker started; T1 context-load IT executed green (`mvn verify`, Tests run: 1). 
 - [x] Verify Maven coordinates — pinned Boot 4.1.0, spring-cloud 2025.1.2, TC 2.0.5, Flyway 12.4.0
 - [x] Design + Tasks + Execute (T1-T8) for Cache Proxy Core
 - [x] Rule Store admin REST CRUD (`/admin/rules`, AD-004) + reload/evict on mutation + gateway excludes /admin & /actuator
-- [x] Dockerize — Dockerfile (multi-stage temurin 26) + docker-compose (postgres + go-httpbin upstream + app); `docker compose up -d`
+- [x] Dockerize — Dockerfile (multi-stage temurin 26) + docker-compose (postgres + app; upstream = external cache-test-origin on host :8081); `docker compose up -d`
+- [x] App Registry + Per-App Rule Routing (AD-006/007/008) — `/admin/applications` CRUD, rule→app FK, slug-prefix routing, MVP fields; 47 tests green
 - [ ] Next feature: Observability — Micrometer hit/miss/bypass counters (X-Cache header already done in filter)
 - [x] Git initialized + pushed → github.com/patrickonofre/p5k-proxy-cache (8 atomic feature commits on top of remote Initial commit; SSH, branch main)
 

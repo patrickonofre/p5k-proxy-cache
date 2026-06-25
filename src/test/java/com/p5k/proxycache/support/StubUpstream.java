@@ -21,6 +21,7 @@ public class StubUpstream {
     private volatile int status = 200;
     private volatile String contentType = "text/plain";
     private volatile String body = "";
+    private volatile String lastPath;
 
     public void start() {
         try {
@@ -30,6 +31,7 @@ public class StubUpstream {
         }
         server.createContext("/", exchange -> {
             requestCount.incrementAndGet();
+            lastPath = exchange.getRequestURI().getRawPath();
             byte[] payload = body.getBytes(StandardCharsets.UTF_8);
             if (contentType != null) {
                 exchange.getResponseHeaders().add("Content-Type", contentType);
@@ -54,6 +56,10 @@ public class StubUpstream {
 
     public int requestCount() {
         return requestCount.get();
+    }
+
+    public String lastPath() {
+        return lastPath;
     }
 
     public void resetCount() {

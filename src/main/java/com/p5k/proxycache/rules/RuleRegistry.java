@@ -28,13 +28,14 @@ public class RuleRegistry {
         this.snapshot = List.copyOf(repository.findAllByEnabledTrue());
     }
 
-    public Optional<CacheRule> match(String method, String path) {
+    public Optional<CacheRule> match(long applicationId, String method, String path) {
         if (method == null || !method.equalsIgnoreCase("GET")) {
             return Optional.empty();
         }
         Comparator<String> bySpecificity = matcher.getPatternComparator(path);
         return snapshot.stream()
                 .filter(CacheRule::isEnabled)
+                .filter(rule -> rule.getApplicationId() != null && rule.getApplicationId() == applicationId)
                 .filter(rule -> ruleAllowsGet(rule))
                 .filter(rule -> matcher.match(rule.getPathPattern(), path))
                 .min((a, b) -> bySpecificity.compare(a.getPathPattern(), b.getPathPattern()));
